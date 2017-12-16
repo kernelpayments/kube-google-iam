@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-google-iam
+  namespace: kube-system
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: kube-google-iam
+  namespace: kube-system
+rules:
+  - apiGroups: [""]
+    resources:
+      - namespaces
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-google-iam
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kube-google-iam
+subjects:
+- kind: ServiceAccount
+  name: kube-google-iam
+  namespace: kube-system
+---
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: kube-google-iam
+  namespace: kube-system
+  labels:
+    app: kube-google-iam
+spec:
+  template:
+    metadata:
+      labels:
+        app: kube-google-iam
+    spec:
+      serviceAccountName: kube-google-iam
+      hostNetwork: true
+      tolerations:
+        # Allow the pod to run on the master.
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+      containers:
+      - name: kube-google-iam
+        image: kernelpay/kube-google-iam:dev
+        args:
+          - "--verbose"
+        imagePullPolicy: Always
