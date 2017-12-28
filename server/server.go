@@ -33,6 +33,10 @@ const (
 	defaultNamespaceKey      = "cloud.google.com/allowed-service-accounts"
 )
 
+var metadataHeader = &http.Header{
+	"Metadata-Flavor": []string{"Google"},
+}
+
 // Server encapsulates all of the parameters necessary for starting up
 // the server. These can either be set via command line or directly.
 type Server struct {
@@ -46,6 +50,8 @@ type Server struct {
 	HostIP                string
 	NamespaceKey          string
 	LogLevel              string
+	AttributeWhitelist    []string
+	AttributeWhitelistSet map[string]struct{}
 	AddIPTablesRule       bool
 	Debug                 bool
 	Insecure              bool
@@ -149,26 +155,35 @@ type HealthResponse struct {
 	InstanceID string `json:"instanceId"`
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	resp, err := http.Get(fmt.Sprintf("http://%s/latest/meta-data/instance-id", s.MetadataAddress))
+func (s *Server) queryMetadata(path string) ([]byte, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("http://%s%s", s.MetadataAddress, path), nil)
 	if err != nil {
-		log.Errorf("Error getting instance id %+v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("query metadata %s: new request %+v", path, err)
+	}
+	req.Header = *metadataHeader
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("query metadata %s: %+v", path, err)
 	}
 	if resp.StatusCode != 200 {
-		msg := fmt.Sprintf("Error getting instance id, got status: %+s", resp.Status)
-		log.Error(msg)
-		http.Error(w, msg, http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("query metadata %s: got status %+s", path, resp.Status)
 	}
 	defer resp.Body.Close()
-	instanceID, err := ioutil.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Errorf("Error reading response body %+v", err)
+		return nil, fmt.Errorf("query metadata %s: can't read response body: %+v", path, err)
+	}
+	return body, nil
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	instanceID, err := s.queryMetadata("/computeMetadata/v1/instance/id")
+	if err != nil {
+		log.Errorf("Error getting instance id: %+v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	health := &HealthResponse{InstanceID: string(instanceID), HostIP: s.HostIP}
 	w.Header().Add("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(health); err != nil {
@@ -342,6 +357,75 @@ func (s *Server) reverseProxyHandler(w http.ResponseWriter, r *http.Request) {
 	logger.WithField("metadata.url", s.MetadataAddress).Debug("Proxy ec2 metadata request")
 }
 
+func (s *Server) handleAttributes(w http.ResponseWriter, r *http.Request) {
+	logger := LoggerFromContext(r.Context())
+
+	attributesJSON, err := s.queryMetadata("/computeMetadata/v1/instance/attributes/?recursive=true")
+	if err != nil {
+		logger.Errorf("Error getting attributes: %+v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var attributes map[string]string
+	err = json.Unmarshal(attributesJSON, &attributes)
+	if err != nil {
+		logger.Errorf("Error unmarshaling attributes: %+v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	result := make(map[string]string)
+	for k, v := range attributes {
+		if _, ok := s.AttributeWhitelistSet[k]; ok {
+			result[k] = v
+		}
+	}
+
+	if strings.ToLower(r.URL.Query().Get("recursive")) == "true" {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(result); err != nil {
+			logger.Errorf("Error sending json %+v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	} else {
+		var data []byte
+		for k := range result {
+			data = append(data, []byte(k)...)
+			data = append(data, '\n')
+		}
+		w.Header().Set("Content-Type", "application/text")
+		if _, err := w.Write(data); err != nil {
+			logger.Errorf("Error sending response %+v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}
+}
+
+func (s *Server) handleAttribute(w http.ResponseWriter, r *http.Request) {
+	logger := LoggerFromContext(r.Context())
+
+	attribute := mux.Vars(r)["attribute"]
+
+	if _, ok := s.AttributeWhitelistSet[attribute]; !ok {
+		http.Error(w, "404 not found", http.StatusNotFound)
+		return
+	}
+
+	value, err := s.queryMetadata("/computeMetadata/v1/instance/attributes/" + attribute)
+	if err != nil {
+		logger.Errorf("Error getting attribute: %+v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/text")
+	if _, err := w.Write(value); err != nil {
+		logger.Errorf("Error sending response %+v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 func write(logger *log.Entry, w http.ResponseWriter, s string) {
 	if _, err := w.Write([]byte(s)); err != nil {
 		logger.Errorf("Error writing response: %+v", err)
@@ -350,6 +434,11 @@ func write(logger *log.Entry, w http.ResponseWriter, s string) {
 
 // Run runs the specified Server.
 func (s *Server) Run() error {
+	s.AttributeWhitelistSet = make(map[string]struct{})
+	for _, a := range s.AttributeWhitelist {
+		s.AttributeWhitelistSet[a] = struct{}{}
+	}
+
 	s.iam = iam.NewClient()
 
 	k, err := k8s.NewClient(s.KubernetesMaster, s.KubeconfigFile)
@@ -397,8 +486,8 @@ func (s *Server) Run() error {
 	r.HandleFunc("/computeMetadata/v1/instance/id", s.reverseProxyHandler)
 	r.HandleFunc("/computeMetadata/v1/instance/zone", s.reverseProxyHandler)
 	r.HandleFunc("/computeMetadata/v1/instance/cpu-platform", s.reverseProxyHandler)
-	r.HandleFunc("/computeMetadata/v1/instance/attributes/", s.reverseProxyHandler)
-	r.HandleFunc("/computeMetadata/v1/instance/attributes/cluster-name", s.reverseProxyHandler)
+	r.HandleFunc("/computeMetadata/v1/instance/attributes/", s.handleAttributes)
+	r.HandleFunc("/computeMetadata/v1/instance/attributes/{attribute:[^/]+}", s.handleAttribute)
 
 	log.Infof("Listening on port %s", s.AppPort)
 	if err := http.ListenAndServe(":"+s.AppPort, newLogHandler(r)); err != nil {

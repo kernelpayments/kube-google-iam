@@ -18,6 +18,7 @@ func addFlags(s *server.Server, fs *pflag.FlagSet) {
 	fs.StringVar(&s.ServiceAccountKey, "service-account-key", s.ServiceAccountKey, "Pod annotation key used to retrieve the service account")
 	fs.BoolVar(&s.Insecure, "insecure", false, "Kubernetes server should be accessed without verifying the TLS. Testing only")
 	fs.StringVar(&s.MetadataAddress, "metadata-addr", s.MetadataAddress, "Address for the metadata service.")
+	fs.StringSliceVar(&s.AttributeWhitelist, "attributes", s.AttributeWhitelist, "Metadata attribute whitelist to pass through to the clients")
 	fs.BoolVar(&s.AddIPTablesRule, "iptables", false, "Add iptables rule (also requires --host-ip)")
 	fs.StringVar(&s.HostInterface, "host-interface", "docker0", "Interface on which to enable the iptables rule")
 	fs.BoolVar(&s.NamespaceRestriction, "namespace-restrictions", false, "Enable namespace restrictions")
