@@ -343,6 +343,8 @@ func write(logger *log.Entry, w http.ResponseWriter, s string) {
 
 // Run runs the specified Server.
 func (s *Server) Run() error {
+	s.iam = iam.NewClient()
+
 	k, err := k8s.NewClient(s.KubernetesMaster, s.KubeconfigFile)
 	if err != nil {
 		return err
@@ -357,7 +359,6 @@ func (s *Server) Run() error {
 	)
 	podSynched := s.k8s.WatchForPods(k8s.NewPodHandler(s.ServiceAccountKey))
 	namespaceSynched := s.k8s.WatchForNamespaces(k8s.NewNamespaceHandler(s.NamespaceKey))
-
 	synced := false
 	for i := 0; i < defaultCacheSyncAttempts && !synced; i++ {
 		synced = cache.WaitForCacheSync(nil, podSynched, namespaceSynched)

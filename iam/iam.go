@@ -26,6 +26,7 @@ const (
 
 // Client represents an IAM client.
 type Client struct {
+	iamService *iam.Service
 }
 
 // Credentials represent the security Credentials response.
@@ -35,9 +36,9 @@ type Credentials struct {
 }
 
 // GetCredentials returns credentials for the given service account.
-func (iam *Client) GetCredentials(serviceAccount string) (*Credentials, error) {
+func (c *Client) GetCredentials(serviceAccount string) (*Credentials, error) {
 	item, err := cache.Fetch(serviceAccount, ttl, func() (interface{}, error) {
-		return getToken(serviceAccount)
+		return c.getCredentialsUncached(serviceAccount)
 	})
 	if err != nil {
 		return nil, err
@@ -47,12 +48,6 @@ func (iam *Client) GetCredentials(serviceAccount string) (*Credentials, error) {
 
 // NewClient returns a new IAM client.
 func NewClient() *Client {
-	return &Client{}
-}
-
-var iamService *iam.Service
-
-func init() {
 	// Authorize the client using Application Default Credentials.
 	// See https://g.co/dv/identity/protocols/application-default-credentials
 	ctx := context.Background()
@@ -61,13 +56,17 @@ func init() {
 		log.Fatal(err)
 	}
 
-	iamService, err = iam.New(client)
+	iamService, err := iam.New(client)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	return &Client{
+		iamService: iamService,
+	}
 }
 
-func getToken(serviceAccount string) (*Credentials, error) {
+func (c *Client) getCredentialsUncached(serviceAccount string) (*Credentials, error) {
 	payload, err := json.Marshal(jws.ClaimSet{
 		Iss:   serviceAccount,
 		Aud:   "https://www.googleapis.com/oauth2/v4/token",
@@ -81,7 +80,7 @@ func getToken(serviceAccount string) (*Credentials, error) {
 	req := &iam.SignJwtRequest{
 		Payload: string(payload),
 	}
-	res, err := iamService.Projects.ServiceAccounts.SignJwt("projects/-/serviceAccounts/"+serviceAccount, req).Do()
+	res, err := c.iamService.Projects.ServiceAccounts.SignJwt("projects/-/serviceAccounts/"+serviceAccount, req).Do()
 	if err != nil {
 		return nil, fmt.Errorf("Error signing JWT: %v", err)
 	}
