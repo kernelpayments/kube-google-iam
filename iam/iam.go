@@ -84,7 +84,6 @@ func (c *Client) getCredentialsUncached(serviceAccount string) (*Credentials, er
 	if err != nil {
 		return nil, fmt.Errorf("Error signing JWT: %v", err)
 	}
-	fmt.Println(res.SignedJwt)
 
 	v := url.Values{}
 	v.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
