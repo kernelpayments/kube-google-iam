@@ -394,6 +394,7 @@ func (s *Server) Run() error {
 	r.HandleFunc("/computeMetadata/v1/project/", s.reverseProxyHandler)
 	r.HandleFunc("/computeMetadata/v1/project/project-id", s.reverseProxyHandler)
 	r.HandleFunc("/computeMetadata/v1/project/numeric-project-id", s.reverseProxyHandler)
+	r.HandleFunc("/computeMetadata/v1/instance/id", s.reverseProxyHandler)
 	r.HandleFunc("/computeMetadata/v1/instance/zone", s.reverseProxyHandler)
 	r.HandleFunc("/computeMetadata/v1/instance/cpu-platform", s.reverseProxyHandler)
 
