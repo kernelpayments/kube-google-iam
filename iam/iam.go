@@ -26,7 +26,6 @@ const (
 
 // Client represents an IAM client.
 type Client struct {
-	BaseARN string
 }
 
 // Credentials represent the security Credentials response.
@@ -47,8 +46,8 @@ func (iam *Client) GetCredentials(serviceAccount string) (*Credentials, error) {
 }
 
 // NewClient returns a new IAM client.
-func NewClient(baseARN string) *Client {
-	return &Client{BaseARN: baseARN}
+func NewClient() *Client {
+	return &Client{}
 }
 
 var iamService *iam.Service

@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"time"
 
-	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/pkg/api/v1"
-	selector "k8s.io/client-go/pkg/fields"
-	"k8s.io/client-go/rest"
+
+	"k8s.io/apimachinery/pkg/util/wait"
+
+	"k8s.io/apimachinery/pkg/fields"
+
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 const (
@@ -22,15 +25,15 @@ const (
 // Client represents a kubernetes client.
 type Client struct {
 	*kubernetes.Clientset
-	namespaceController *cache.Controller
+	namespaceController cache.Controller
 	namespaceIndexer    cache.Indexer
-	podController       *cache.Controller
+	podController       cache.Controller
 	podIndexer          cache.Indexer
 }
 
 // Returns a cache.ListWatch that gets all changes to pods.
 func (k8s *Client) createPodLW() *cache.ListWatch {
-	return cache.NewListWatchFromClient(k8s.CoreV1().RESTClient(), "pods", v1.NamespaceAll, selector.Everything())
+	return cache.NewListWatchFromClient(k8s.CoreV1().RESTClient(), "pods", v1.NamespaceAll, fields.Everything())
 }
 
 // WatchForPods watches for pod changes.
@@ -48,7 +51,7 @@ func (k8s *Client) WatchForPods(podEventLogger cache.ResourceEventHandler) cache
 
 // returns a cache.ListWatch of namespaces.
 func (k8s *Client) createNamespaceLW() *cache.ListWatch {
-	return cache.NewListWatchFromClient(k8s.CoreV1().RESTClient(), "namespaces", v1.NamespaceAll, selector.Everything())
+	return cache.NewListWatchFromClient(k8s.CoreV1().RESTClient(), "namespaces", v1.NamespaceAll, fields.Everything())
 }
 
 // WatchForNamespaces watches for namespaces changes.
@@ -118,21 +121,13 @@ func (k8s *Client) NamespaceByName(namespaceName string) (*v1.Namespace, error) 
 }
 
 // NewClient returns a new kubernetes client.
-func NewClient(host, token string, insecure bool) (*Client, error) {
-	var config *rest.Config
-	var err error
-	if host != "" && token != "" {
-		config = &rest.Config{
-			Host:        host,
-			BearerToken: token,
-			Insecure:    insecure,
-		}
-	} else {
-		config, err = rest.InClusterConfig()
-		if err != nil {
-			return nil, err
-		}
+func NewClient(master, kubeconfig string) (*Client, error) {
+	// creates the connection
+	config, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
+	if err != nil {
+		return nil, err
 	}
+
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, err

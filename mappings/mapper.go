@@ -6,7 +6,7 @@ import (
 	"github.com/KernelPay/kube-google-iam/k8s"
 	glob "github.com/ryanuber/go-glob"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/client-go/pkg/api/v1"
+	"k8s.io/api/core/v1"
 )
 
 // ServiceAccountMapper handles relevant logic around associating IPs with a given IAM serviceAccount

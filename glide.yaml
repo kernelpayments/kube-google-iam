@@ -5,7 +5,7 @@ import:
 - package: github.com/spf13/pflag
 - package: k8s.io/apimachinery
 - package: k8s.io/client-go
-  version: v2.0.0
+  version: v6.0.0
   subpackages:
   - pkg/api/v1
   - kubernetes
@@ -19,3 +19,10 @@ import:
 - package: github.com/sirupsen/logrus
   version: ^1.0.2
 - package: github.com/ryanuber/go-glob
+- package: cloud.google.com/go
+  version: ^0.17.0
+  subpackages:
+  - compute/metadata
+- package: google.golang.org/api
+  subpackages:
+  - iam/v1

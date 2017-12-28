@@ -10,8 +10,8 @@ import (
 
 // addFlags adds the command line flags.
 func addFlags(s *server.Server, fs *pflag.FlagSet) {
-	fs.StringVar(&s.APIServer, "api-server", s.APIServer, "Endpoint for the api server")
-	fs.StringVar(&s.APIToken, "api-token", s.APIToken, "Token to authenticate with the api server")
+	fs.StringVar(&s.KubeconfigFile, "kubeconfig", s.KubeconfigFile, "Absolute path to the kubeconfig file")
+	fs.StringVar(&s.KubernetesMaster, "server", s.KubernetesMaster, "The address and port of the Kubernetes API server")
 	fs.StringVar(&s.AppPort, "app-port", s.AppPort, "Http port")
 	fs.BoolVar(&s.Debug, "debug", s.Debug, "Enable debug features")
 	fs.StringVar(&s.DefaultServiceAccount, "default-service-account", s.DefaultServiceAccount, "Fallback service account to use when annotation is not set")
@@ -56,7 +56,7 @@ func main() {
 		}
 	}
 
-	if err := s.Run(s.APIServer, s.APIToken, s.Insecure); err != nil {
+	if err := s.Run(); err != nil {
 		log.Fatalf("%s", err)
 	}
 }

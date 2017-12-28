@@ -36,8 +36,8 @@ const (
 // Server encapsulates all of the parameters necessary for starting up
 // the server. These can either be set via command line or directly.
 type Server struct {
-	APIServer             string
-	APIToken              string
+	KubeconfigFile        string
+	KubernetesMaster      string
 	AppPort               string
 	DefaultServiceAccount string
 	ServiceAccountKey     string
@@ -342,8 +342,8 @@ func write(logger *log.Entry, w http.ResponseWriter, s string) {
 }
 
 // Run runs the specified Server.
-func (s *Server) Run(host, token string, insecure bool) error {
-	k, err := k8s.NewClient(host, token, insecure)
+func (s *Server) Run() error {
+	k, err := k8s.NewClient(s.KubernetesMaster, s.KubeconfigFile)
 	if err != nil {
 		return err
 	}
