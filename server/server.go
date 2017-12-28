@@ -2,13 +2,13 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"runtime"
 	"strings"
 	"time"
 
@@ -59,7 +59,15 @@ type Server struct {
 	BackoffMaxInterval    time.Duration
 }
 
-type appHandler func(*log.Entry, http.ResponseWriter, *http.Request)
+type logHandler struct {
+	handler http.Handler
+}
+
+func newLogHandler(handler http.Handler) *logHandler {
+	return &logHandler{
+		handler: handler,
+	}
+}
 
 type responseWriter struct {
 	http.ResponseWriter
@@ -77,7 +85,7 @@ func newResponseWriter(w http.ResponseWriter) *responseWriter {
 
 // ServeHTTP implements the net/http server Handler interface
 // and recovers from panics.
-func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h logHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logger := log.WithFields(log.Fields{
 		"req.method": r.Method,
 		"req.path":   r.URL.Path,
@@ -85,23 +93,17 @@ func (fn appHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 	start := time.Now()
 	defer func() {
-		var err error
-		if rec := recover(); rec != nil {
-			switch t := rec.(type) {
-			case string:
-				err = errors.New(t)
-			case error:
-				err = t
-			default:
-				err = errors.New("Unknown error")
-			}
+		if err := recover(); err != nil {
+			const size = 64 << 10
+			buf := make([]byte, size)
+			buf = buf[:runtime.Stack(buf, false)]
 			logger.WithField("res.status", http.StatusInternalServerError).
-				Errorf("PANIC error processing request: %+v", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+				Errorf("PANIC serving request: %v\n%s", err, buf)
+			http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
 		}
 	}()
 	rw := newResponseWriter(w)
-	fn(logger, rw, r)
+	h.handler.ServeHTTP(rw, r.WithContext(ContextWithLogger(r.Context(), logger)))
 	if r.URL.Path != "/healthz" {
 		latency := time.Since(start)
 		logger.WithFields(log.Fields{"res.duration": latency.Nanoseconds(), "res.status": rw.statusCode}).
@@ -147,7 +149,7 @@ type HealthResponse struct {
 	InstanceID string `json:"instanceId"`
 }
 
-func (s *Server) handleHealth(logger *log.Entry, w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	resp, err := http.Get(fmt.Sprintf("http://%s/latest/meta-data/instance-id", s.MetadataAddress))
 	if err != nil {
 		log.Errorf("Error getting instance id %+v", err)
@@ -175,7 +177,7 @@ func (s *Server) handleHealth(logger *log.Entry, w http.ResponseWriter, r *http.
 	}
 }
 
-func (s *Server) handleDebug(logger *log.Entry, w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 	o, err := json.Marshal(s.serviceAccountMapper.DumpDebugInfo())
 	if err != nil {
 		log.Errorf("Error converting debug map to json: %+v", err)
@@ -183,15 +185,16 @@ func (s *Server) handleDebug(logger *log.Entry, w http.ResponseWriter, r *http.R
 		return
 	}
 
+	logger := LoggerFromContext(r.Context())
 	write(logger, w, string(o))
 }
 
-func (s *Server) handleDiscovery(logger *log.Entry, w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Metadata-Flavor", "Google")
 	w.WriteHeader(200)
 }
 
-func (s *Server) extractServiceAccount(logger *log.Entry, w http.ResponseWriter, r *http.Request) *mappings.ServiceAccountMappingResult {
+func (s *Server) extractServiceAccount(w http.ResponseWriter, r *http.Request) *mappings.ServiceAccountMappingResult {
 	w.Header().Set("Metadata-Flavor", "Google")
 
 	if r.Header.Get("Metadata-Flavor") != "Google" {
@@ -207,6 +210,7 @@ func (s *Server) extractServiceAccount(logger *log.Entry, w http.ResponseWriter,
 		return nil
 	}
 
+	logger := LoggerFromContext(r.Context())
 	serviceAccountLogger := logger.WithFields(log.Fields{
 		"pod.iam.serviceAccount": serviceAccountMapping.ServiceAccount,
 		"ns.name":                serviceAccountMapping.Namespace,
@@ -224,12 +228,13 @@ func (s *Server) extractServiceAccount(logger *log.Entry, w http.ResponseWriter,
 	return serviceAccountMapping
 }
 
-func (s *Server) handleToken(logger *log.Entry, w http.ResponseWriter, r *http.Request) {
-	serviceAccountMapping := s.extractServiceAccount(logger, w, r)
+func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
+	serviceAccountMapping := s.extractServiceAccount(w, r)
 	if serviceAccountMapping == nil {
 		return
 	}
 
+	logger := LoggerFromContext(r.Context())
 	serviceAccountLogger := logger.WithFields(log.Fields{
 		"pod.iam.serviceAccount": serviceAccountMapping.ServiceAccount,
 		"ns.name":                serviceAccountMapping.Namespace,
@@ -258,8 +263,8 @@ func (s *Server) handleToken(logger *log.Entry, w http.ResponseWriter, r *http.R
 	}
 }
 
-func (s *Server) handleEmail(logger *log.Entry, w http.ResponseWriter, r *http.Request) {
-	serviceAccountMapping := s.extractServiceAccount(logger, w, r)
+func (s *Server) handleEmail(w http.ResponseWriter, r *http.Request) {
+	serviceAccountMapping := s.extractServiceAccount(w, r)
 	if serviceAccountMapping == nil {
 		return
 	}
@@ -267,12 +272,13 @@ func (s *Server) handleEmail(logger *log.Entry, w http.ResponseWriter, r *http.R
 	w.Write([]byte(serviceAccountMapping.ServiceAccount))
 }
 
-func (s *Server) handleServiceAccount(logger *log.Entry, w http.ResponseWriter, r *http.Request) {
-	serviceAccountMapping := s.extractServiceAccount(logger, w, r)
+func (s *Server) handleServiceAccount(w http.ResponseWriter, r *http.Request) {
+	serviceAccountMapping := s.extractServiceAccount(w, r)
 	if serviceAccountMapping == nil {
 		return
 	}
 
+	logger := LoggerFromContext(r.Context())
 	serviceAccountLogger := logger.WithFields(log.Fields{
 		"pod.iam.serviceAccount": serviceAccountMapping.ServiceAccount,
 		"ns.name":                serviceAccountMapping.Namespace,
@@ -296,7 +302,7 @@ func (s *Server) handleServiceAccount(logger *log.Entry, w http.ResponseWriter, 
 	}
 }
 
-func (s *Server) handleServiceAccounts(logger *log.Entry, w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleServiceAccounts(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Metadata-Flavor", "Google")
 
 	if r.Header.Get("Metadata-Flavor") != "Google" {
@@ -328,10 +334,11 @@ func (x xForwardedForStripper) RoundTrip(req *http.Request) (*http.Response, err
 	return http.DefaultTransport.RoundTrip(req)
 }
 
-func (s *Server) reverseProxyHandler(logger *log.Entry, w http.ResponseWriter, r *http.Request) {
+func (s *Server) reverseProxyHandler(w http.ResponseWriter, r *http.Request) {
 	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: s.MetadataAddress})
 	proxy.Transport = xForwardedForStripper{}
 	proxy.ServeHTTP(w, r)
+	logger := LoggerFromContext(r.Context())
 	logger.WithField("metadata.url", s.MetadataAddress).Debug("Proxy ec2 metadata request")
 }
 
@@ -374,24 +381,24 @@ func (s *Server) Run() error {
 
 	if s.Debug {
 		// This is a potential security risk if enabled in some clusters, hence the flag
-		r.Handle("/debug/store", appHandler(s.handleDebug))
+		r.HandleFunc("/debug/store", s.handleDebug)
 	}
-	r.Handle("/healthz", appHandler(s.handleHealth))
-	r.Handle("/", appHandler(s.handleDiscovery))
-	r.Handle("/computeMetadata/", appHandler(s.handleDiscovery))
-	r.Handle("/computeMetadata/v1/", appHandler(s.handleDiscovery))
-	r.Handle("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/token", appHandler(s.handleToken))
-	r.Handle("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/email", appHandler(s.handleEmail))
-	r.Handle("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/", appHandler(s.handleServiceAccount))
-	r.Handle("/computeMetadata/v1/instance/service-accounts/", appHandler(s.handleServiceAccounts))
-	r.Handle("/computeMetadata/v1/project/", appHandler(s.reverseProxyHandler))
-	r.Handle("/computeMetadata/v1/project/project-id", appHandler(s.reverseProxyHandler))
-	r.Handle("/computeMetadata/v1/project/numeric-project-id", appHandler(s.reverseProxyHandler))
-	r.Handle("/computeMetadata/v1/instance/zone", appHandler(s.reverseProxyHandler))
-	r.Handle("/computeMetadata/v1/instance/cpu-platform", appHandler(s.reverseProxyHandler))
+	r.HandleFunc("/healthz", s.handleHealth)
+	r.HandleFunc("/", s.handleDiscovery)
+	r.HandleFunc("/computeMetadata/", s.handleDiscovery)
+	r.HandleFunc("/computeMetadata/v1/", s.handleDiscovery)
+	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/token", s.handleToken)
+	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/email", s.handleEmail)
+	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/", s.handleServiceAccount)
+	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/", s.handleServiceAccounts)
+	r.HandleFunc("/computeMetadata/v1/project/", s.reverseProxyHandler)
+	r.HandleFunc("/computeMetadata/v1/project/project-id", s.reverseProxyHandler)
+	r.HandleFunc("/computeMetadata/v1/project/numeric-project-id", s.reverseProxyHandler)
+	r.HandleFunc("/computeMetadata/v1/instance/zone", s.reverseProxyHandler)
+	r.HandleFunc("/computeMetadata/v1/instance/cpu-platform", s.reverseProxyHandler)
 
 	log.Infof("Listening on port %s", s.AppPort)
-	if err := http.ListenAndServe(":"+s.AppPort, r); err != nil {
+	if err := http.ListenAndServe(":"+s.AppPort, newLogHandler(r)); err != nil {
 		log.Fatalf("Error creating http server: %+v", err)
 	}
 	return nil
