@@ -397,6 +397,8 @@ func (s *Server) Run() error {
 	r.HandleFunc("/computeMetadata/v1/instance/id", s.reverseProxyHandler)
 	r.HandleFunc("/computeMetadata/v1/instance/zone", s.reverseProxyHandler)
 	r.HandleFunc("/computeMetadata/v1/instance/cpu-platform", s.reverseProxyHandler)
+	r.HandleFunc("/computeMetadata/v1/instance/attributes/", s.reverseProxyHandler)
+	r.HandleFunc("/computeMetadata/v1/instance/attributes/cluster-name", s.reverseProxyHandler)
 
 	log.Infof("Listening on port %s", s.AppPort)
 	if err := http.ListenAndServe(":"+s.AppPort, newLogHandler(r)); err != nil {
