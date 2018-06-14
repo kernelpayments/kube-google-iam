@@ -231,7 +231,7 @@ Usage of kube-google-iam:
 
 # Author
 
-Port to work with Google Cloud service accoutns: Dario Nieuwenhuis, [@dirbaio](https://github.com/Dirbaio)
+Port to work with Google Cloud service accounts: Dario Nieuwenhuis, [@dirbaio](https://github.com/Dirbaio)
 Original kube2iam for AWS by Jerome Touffe-Blin, [@jtblin](https://twitter.com/jtblin), [About me](http://about.me/jtblin)
 
 # License
