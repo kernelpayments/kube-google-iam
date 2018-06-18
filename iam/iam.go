@@ -13,7 +13,6 @@ import (
 
 	"github.com/karlseguin/ccache"
 	"golang.org/x/oauth2/google"
-	"golang.org/x/oauth2/jws"
 	iam "google.golang.org/api/iam/v1"
 )
 
@@ -27,23 +26,6 @@ const (
 // Client represents an IAM client.
 type Client struct {
 	iamService *iam.Service
-}
-
-// Credentials represent the security Credentials response.
-type Credentials struct {
-	AccessToken string
-	Expires     time.Time
-}
-
-// GetCredentials returns credentials for the given service account.
-func (c *Client) GetCredentials(serviceAccount string) (*Credentials, error) {
-	item, err := cache.Fetch(serviceAccount, ttl, func() (interface{}, error) {
-		return c.getCredentialsUncached(serviceAccount)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return item.Value().(*Credentials), nil
 }
 
 // NewClient returns a new IAM client.
@@ -66,21 +48,78 @@ func NewClient() *Client {
 	}
 }
 
-func (c *Client) getCredentialsUncached(serviceAccount string) (*Credentials, error) {
-	payload, err := json.Marshal(jws.ClaimSet{
-		Iss:   serviceAccount,
-		Aud:   "https://www.googleapis.com/oauth2/v4/token",
-		Scope: iam.CloudPlatformScope,
-		Exp:   time.Now().Add(time.Hour).Unix(),
-		Iat:   time.Now().Unix(),
+// Credentials represent the security Credentials response.
+type Credentials struct {
+	Token   string
+	Expires time.Time
+}
+
+type credentialRequestType int
+
+const (
+	credentialRequestTypeAccessToken credentialRequestType = iota
+	credentialRequestTypeIDToken
+)
+
+type credentialRequest struct {
+	Type           credentialRequestType
+	ServiceAccount string
+	Audience       string
+}
+
+func (c *Client) GetAccessToken(serviceAccount string) (*Credentials, error) {
+	return c.getCredentials(credentialRequest{
+		Type:           credentialRequestTypeAccessToken,
+		ServiceAccount: serviceAccount,
+	})
+}
+
+func (c *Client) GetIDToken(serviceAccount string, audience string) (*Credentials, error) {
+	return c.getCredentials(credentialRequest{
+		Type:           credentialRequestTypeIDToken,
+		ServiceAccount: serviceAccount,
+		Audience:       audience,
+	})
+}
+
+// GetCredentials returns credentials for the given service account.
+func (c *Client) getCredentials(req credentialRequest) (*Credentials, error) {
+	reqStr, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	item, err := cache.Fetch(string(reqStr), ttl, func() (interface{}, error) {
+		return c.getCredentialsUncached(req)
 	})
 	if err != nil {
 		return nil, err
 	}
-	req := &iam.SignJwtRequest{
+	return item.Value().(*Credentials), nil
+}
+
+func (c *Client) getCredentialsUncached(req credentialRequest) (*Credentials, error) {
+	claims := map[string]interface{}{
+		"iss": req.ServiceAccount,
+		"aud": "https://www.googleapis.com/oauth2/v4/token",
+		"exp": time.Now().Add(time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+	}
+	if req.Type == credentialRequestTypeAccessToken {
+		claims["scope"] = iam.CloudPlatformScope
+	} else if req.Type == credentialRequestTypeIDToken {
+		claims["target_audience"] = req.Audience
+	} else {
+		return nil, fmt.Errorf("Unknown cred request type %d", req.Type)
+	}
+
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		return nil, err
+	}
+	jwtReq := &iam.SignJwtRequest{
 		Payload: string(payload),
 	}
-	res, err := c.iamService.Projects.ServiceAccounts.SignJwt("projects/-/serviceAccounts/"+serviceAccount, req).Do()
+	res, err := c.iamService.Projects.ServiceAccounts.SignJwt("projects/-/serviceAccounts/"+req.ServiceAccount, jwtReq).Do()
 	if err != nil {
 		return nil, fmt.Errorf("Error signing JWT: %v", err)
 	}
@@ -110,8 +149,15 @@ func (c *Client) getCredentialsUncached(serviceAccount string) (*Credentials, er
 	if err := json.Unmarshal(body, &tokenRes); err != nil {
 		return nil, fmt.Errorf("oauth2: cannot fetch token: %v", err)
 	}
+
+	var token string
+	if req.Type == credentialRequestTypeAccessToken {
+		token = tokenRes.AccessToken
+	} else if req.Type == credentialRequestTypeIDToken {
+		token = tokenRes.IDToken
+	}
 	return &Credentials{
-		AccessToken: tokenRes.AccessToken,
-		Expires:     time.Now().Add(time.Duration(tokenRes.ExpiresIn) * time.Second),
+		Token:   token,
+		Expires: time.Now().Add(time.Duration(tokenRes.ExpiresIn) * time.Second),
 	}, nil
 }

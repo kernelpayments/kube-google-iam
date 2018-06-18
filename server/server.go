@@ -255,7 +255,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		"ns.name":                serviceAccountMapping.Namespace,
 	})
 
-	credentials, err := s.iam.GetCredentials(serviceAccountMapping.ServiceAccount)
+	credentials, err := s.iam.GetAccessToken(serviceAccountMapping.ServiceAccount)
 	if err != nil {
 		serviceAccountLogger.Errorf("Error assuming serviceAccount %+v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -267,7 +267,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		TokenType   string `json:"token_type"`
 		ExpiresIn   int64  `json:"expires_in"`
 	}{
-		AccessToken: credentials.AccessToken,
+		AccessToken: credentials.Token,
 		TokenType:   "Bearer",
 		ExpiresIn:   int64(credentials.Expires.Sub(time.Now()).Seconds()),
 	}
@@ -276,6 +276,34 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		serviceAccountLogger.Errorf("Error sending json %+v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (s *Server) handleIdentity(w http.ResponseWriter, r *http.Request) {
+	serviceAccountMapping := s.extractServiceAccount(w, r)
+	if serviceAccountMapping == nil {
+		return
+	}
+
+	logger := LoggerFromContext(r.Context())
+	serviceAccountLogger := logger.WithFields(log.Fields{
+		"pod.iam.serviceAccount": serviceAccountMapping.ServiceAccount,
+		"ns.name":                serviceAccountMapping.Namespace,
+	})
+
+	audience := r.URL.Query().Get("audience")
+	if audience == "" {
+		http.Error(w, "audience parameter required", http.StatusBadRequest)
+		return
+	}
+
+	credentials, err := s.iam.GetIDToken(serviceAccountMapping.ServiceAccount, audience)
+	if err != nil {
+		serviceAccountLogger.Errorf("Error assuming serviceAccount %+v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Write([]byte(credentials.Token))
 }
 
 func (s *Server) handleEmail(w http.ResponseWriter, r *http.Request) {
@@ -478,6 +506,7 @@ func (s *Server) Run() error {
 	r.HandleFunc("/computeMetadata/v1/", s.handleDiscovery)
 	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/token", s.handleToken)
 	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/email", s.handleEmail)
+	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/identity", s.handleIdentity)
 	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/", s.handleServiceAccount)
 	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/", s.handleServiceAccounts)
 	r.HandleFunc("/computeMetadata/v1/project/", s.reverseProxyHandler)
