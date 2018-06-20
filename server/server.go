@@ -60,7 +60,7 @@ type Server struct {
 	Version               bool
 	k8s                   *k8s.Client
 	iam                   *iam.Client
-	serviceAccountMapper  *mappings.ServiceAccountMapper
+	Mapper                mappings.Mapper
 	BackoffMaxElapsedTime time.Duration
 	BackoffMaxInterval    time.Duration
 }
@@ -129,11 +129,11 @@ func parseRemoteAddr(addr string) string {
 	return hostname
 }
 
-func (s *Server) getServiceAccountMapping(IP string) (*mappings.ServiceAccountMappingResult, error) {
-	var serviceAccountMapping *mappings.ServiceAccountMappingResult
+func (s *Server) getServiceAccountMapping(IP string) (*mappings.Result, error) {
+	var serviceAccountMapping *mappings.Result
 	var err error
 	operation := func() error {
-		serviceAccountMapping, err = s.serviceAccountMapper.GetServiceAccountMapping(IP)
+		serviceAccountMapping, err = s.Mapper.GetServiceAccountMapping(IP)
 		return err
 	}
 
@@ -193,7 +193,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
-	o, err := json.Marshal(s.serviceAccountMapper.DumpDebugInfo())
+	debug, ok := s.Mapper.(mappings.MapperDebug)
+	if !ok {
+		http.Error(w, "Active mapper can't print debug info", http.StatusInternalServerError)
+		return
+	}
+
+	o, err := json.Marshal(debug.DumpDebugInfo())
 	if err != nil {
 		log.Errorf("Error converting debug map to json: %+v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -209,7 +215,7 @@ func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 
-func (s *Server) extractServiceAccount(w http.ResponseWriter, r *http.Request) *mappings.ServiceAccountMappingResult {
+func (s *Server) extractServiceAccount(w http.ResponseWriter, r *http.Request) *mappings.Result {
 	w.Header().Set("Metadata-Flavor", "Google")
 
 	if r.Header.Get("Metadata-Flavor") != "Google" {
@@ -474,7 +480,7 @@ func (s *Server) Run() error {
 		return err
 	}
 	s.k8s = k
-	s.serviceAccountMapper = mappings.NewServiceAccountMapper(
+	s.Mapper = mappings.NewK8sMapper(
 		s.ServiceAccountKey,
 		s.DefaultServiceAccount,
 		s.NamespaceRestriction,

@@ -51,7 +51,7 @@ func TestExtractServiceAccount(t *testing.T) {
 	}
 	for _, tt := range serviceAccountExtractionTests {
 		t.Run(tt.test, func(t *testing.T) {
-			rp := ServiceAccountMapper{}
+			rp := K8sMapper{}
 			rp.iamServiceAccountKey = "serviceAccountKey"
 			rp.defaultServiceAccount = tt.defaultServiceAccount
 
@@ -138,7 +138,7 @@ func TestCheckServiceAccountForNamespace(t *testing.T) {
 
 	for _, tt := range serviceAccountCheckTests {
 		t.Run(tt.test, func(t *testing.T) {
-			rp := NewServiceAccountMapper(
+			rp := NewK8sMapper(
 				serviceAccountKey,
 				tt.defaultServiceAccount,
 				tt.namespaceRestriction,

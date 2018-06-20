@@ -9,8 +9,8 @@ import (
 	"k8s.io/api/core/v1"
 )
 
-// ServiceAccountMapper handles relevant logic around associating IPs with a given IAM serviceAccount
-type ServiceAccountMapper struct {
+// K8sMapper handles relevant logic around associating IPs with a given IAM serviceAccount
+type K8sMapper struct {
 	defaultServiceAccount string
 	iamServiceAccountKey  string
 	namespaceKey          string
@@ -25,15 +25,8 @@ type store interface {
 	NamespaceByName(string) (*v1.Namespace, error)
 }
 
-// ServiceAccountMappingResult represents the relevant information for a given mapping request
-type ServiceAccountMappingResult struct {
-	ServiceAccount string
-	IP             string
-	Namespace      string
-}
-
-// GetServiceAccountMapping returns the normalized iam ServiceAccountMappingResult based on IP address
-func (r *ServiceAccountMapper) GetServiceAccountMapping(IP string) (*ServiceAccountMappingResult, error) {
+// GetServiceAccountMapping returns the normalized iam Result based on IP address
+func (r *K8sMapper) GetServiceAccountMapping(IP string) (*Result, error) {
 	pod, err := r.store.PodByIP(IP)
 	// If attempting to get a Pod that maps to multiple IPs
 	if err != nil {
@@ -47,7 +40,7 @@ func (r *ServiceAccountMapper) GetServiceAccountMapping(IP string) (*ServiceAcco
 
 	// Determine if serviceAccount is allowed to be used in pod's namespace
 	if r.checkServiceAccountForNamespace(serviceAccount, pod.GetNamespace()) {
-		return &ServiceAccountMappingResult{ServiceAccount: serviceAccount, Namespace: pod.GetNamespace(), IP: IP}, nil
+		return &Result{ServiceAccount: serviceAccount, Namespace: pod.GetNamespace(), IP: IP}, nil
 	}
 
 	return nil, fmt.Errorf("ServiceAccount requested %s not valid for namespace of pod at %s with namespace %s", serviceAccount, IP, pod.GetNamespace())
@@ -56,7 +49,7 @@ func (r *ServiceAccountMapper) GetServiceAccountMapping(IP string) (*ServiceAcco
 // extractServiceAccount extracts the serviceAccount to be used for a given pod,
 // taking into consideration the appropriate fallback logic and defaulting
 // logic along with the namespace serviceAccount restrictions
-func (r *ServiceAccountMapper) extractServiceAccount(pod *v1.Pod) (string, error) {
+func (r *K8sMapper) extractServiceAccount(pod *v1.Pod) (string, error) {
 	serviceAccount, annotationPresent := pod.GetAnnotations()[r.iamServiceAccountKey]
 
 	if !annotationPresent && r.defaultServiceAccount == "" {
@@ -73,7 +66,7 @@ func (r *ServiceAccountMapper) extractServiceAccount(pod *v1.Pod) (string, error
 
 // checkServiceAccountForNamespace checks the 'database' for a serviceAccount allowed in a namespace,
 // returns true if the serviceAccount is found, otheriwse false
-func (r *ServiceAccountMapper) checkServiceAccountForNamespace(serviceAccountArn string, namespace string) bool {
+func (r *K8sMapper) checkServiceAccountForNamespace(serviceAccountArn string, namespace string) bool {
 	if !r.namespaceRestriction || serviceAccountArn == r.defaultServiceAccount {
 		return true
 	}
@@ -96,7 +89,7 @@ func (r *ServiceAccountMapper) checkServiceAccountForNamespace(serviceAccountArn
 }
 
 // DumpDebugInfo outputs all the serviceAccounts by IP address.
-func (r *ServiceAccountMapper) DumpDebugInfo() map[string]interface{} {
+func (r *K8sMapper) DumpDebugInfo() map[string]interface{} {
 	output := make(map[string]interface{})
 	serviceAccountsByIP := make(map[string]string)
 	namespacesByIP := make(map[string]string)
@@ -126,9 +119,9 @@ func (r *ServiceAccountMapper) DumpDebugInfo() map[string]interface{} {
 	return output
 }
 
-// NewServiceAccountMapper returns a new ServiceAccountMapper for use.
-func NewServiceAccountMapper(serviceAccountKey string, defaultServiceAccount string, namespaceRestriction bool, namespaceKey string, kubeStore store) *ServiceAccountMapper {
-	return &ServiceAccountMapper{
+// NewK8sMapper returns a new K8sMapper for use.
+func NewK8sMapper(serviceAccountKey string, defaultServiceAccount string, namespaceRestriction bool, namespaceKey string, kubeStore store) *K8sMapper {
+	return &K8sMapper{
 		defaultServiceAccount: defaultServiceAccount,
 		iamServiceAccountKey:  serviceAccountKey,
 		namespaceKey:          namespaceKey,
