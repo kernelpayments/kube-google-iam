@@ -12,13 +12,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KernelPay/kube-google-iam/config"
 	"github.com/KernelPay/kube-google-iam/iam"
-	"github.com/KernelPay/kube-google-iam/k8s"
 	"github.com/KernelPay/kube-google-iam/mappings"
 	"github.com/cenk/backoff"
 	"github.com/gorilla/mux"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/client-go/tools/cache"
 )
 
 const (
@@ -40,29 +39,9 @@ var metadataHeader = &http.Header{
 // Server encapsulates all of the parameters necessary for starting up
 // the server. These can either be set via command line or directly.
 type Server struct {
-	KubeconfigFile        string
-	KubernetesMaster      string
-	AppPort               string
-	DefaultServiceAccount string
-	ServiceAccountKey     string
-	MetadataAddress       string
-	HostInterface         string
-	HostIP                string
-	NamespaceKey          string
-	LogLevel              string
-	AttributeWhitelist    []string
-	AttributeWhitelistSet map[string]struct{}
-	AddIPTablesRule       bool
-	Debug                 bool
-	Insecure              bool
-	NamespaceRestriction  bool
-	Verbose               bool
-	Version               bool
-	k8s                   *k8s.Client
-	iam                   *iam.Client
-	Mapper                mappings.Mapper
-	BackoffMaxElapsedTime time.Duration
-	BackoffMaxInterval    time.Duration
+	cfg    *config.Config
+	iam    *iam.Client
+	mapper mappings.Mapper
 }
 
 type logHandler struct {
@@ -133,13 +112,13 @@ func (s *Server) getServiceAccountMapping(IP string) (*mappings.Result, error) {
 	var serviceAccountMapping *mappings.Result
 	var err error
 	operation := func() error {
-		serviceAccountMapping, err = s.Mapper.GetServiceAccountMapping(IP)
+		serviceAccountMapping, err = s.mapper.GetServiceAccountMapping(IP)
 		return err
 	}
 
 	expBackoff := backoff.NewExponentialBackOff()
-	expBackoff.MaxInterval = s.BackoffMaxInterval
-	expBackoff.MaxElapsedTime = s.BackoffMaxElapsedTime
+	expBackoff.MaxInterval = s.cfg.BackoffMaxInterval
+	expBackoff.MaxElapsedTime = s.cfg.BackoffMaxElapsedTime
 
 	err = backoff.Retry(operation, expBackoff)
 	if err != nil {
@@ -156,7 +135,7 @@ type HealthResponse struct {
 }
 
 func (s *Server) queryMetadata(path string) ([]byte, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("http://%s%s", s.MetadataAddress, path), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("http://%s%s", s.cfg.MetadataAddress, path), nil)
 	if err != nil {
 		return nil, fmt.Errorf("query metadata %s: new request %+v", path, err)
 	}
@@ -184,7 +163,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	health := &HealthResponse{InstanceID: string(instanceID), HostIP: s.HostIP}
+	health := &HealthResponse{InstanceID: string(instanceID), HostIP: s.cfg.HostIP}
 	w.Header().Add("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(health); err != nil {
 		log.Errorf("Error sending json %+v", err)
@@ -193,7 +172,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
-	debug, ok := s.Mapper.(mappings.MapperDebug)
+	debug, ok := s.mapper.(mappings.MapperDebug)
 	if !ok {
 		http.Error(w, "Active mapper can't print debug info", http.StatusInternalServerError)
 		return
@@ -384,11 +363,11 @@ func (x xForwardedForStripper) RoundTrip(req *http.Request) (*http.Response, err
 }
 
 func (s *Server) reverseProxyHandler(w http.ResponseWriter, r *http.Request) {
-	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: s.MetadataAddress})
+	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: s.cfg.MetadataAddress})
 	proxy.Transport = xForwardedForStripper{}
 	proxy.ServeHTTP(w, r)
 	logger := LoggerFromContext(r.Context())
-	logger.WithField("metadata.url", s.MetadataAddress).Debug("Proxy ec2 metadata request")
+	logger.WithField("metadata.url", s.cfg.MetadataAddress).Debug("Proxy ec2 metadata request")
 }
 
 func (s *Server) handleAttributes(w http.ResponseWriter, r *http.Request) {
@@ -411,7 +390,7 @@ func (s *Server) handleAttributes(w http.ResponseWriter, r *http.Request) {
 
 	result := make(map[string]string)
 	for k, v := range attributes {
-		if _, ok := s.AttributeWhitelistSet[k]; ok {
+		if _, ok := s.cfg.AttributeWhitelistSet[k]; ok {
 			result[k] = v
 		}
 	}
@@ -441,7 +420,7 @@ func (s *Server) handleAttribute(w http.ResponseWriter, r *http.Request) {
 
 	attribute := mux.Vars(r)["attribute"]
 
-	if _, ok := s.AttributeWhitelistSet[attribute]; !ok {
+	if _, ok := s.cfg.AttributeWhitelistSet[attribute]; !ok {
 		http.Error(w, "404 not found", http.StatusNotFound)
 		return
 	}
@@ -468,41 +447,10 @@ func write(logger *log.Entry, w http.ResponseWriter, s string) {
 
 // Run runs the specified Server.
 func (s *Server) Run() error {
-	s.AttributeWhitelistSet = make(map[string]struct{})
-	for _, a := range s.AttributeWhitelist {
-		s.AttributeWhitelistSet[a] = struct{}{}
-	}
-
-	s.iam = iam.NewClient()
-
-	k, err := k8s.NewClient(s.KubernetesMaster, s.KubeconfigFile)
-	if err != nil {
-		return err
-	}
-	s.k8s = k
-	s.Mapper = mappings.NewK8sMapper(
-		s.ServiceAccountKey,
-		s.DefaultServiceAccount,
-		s.NamespaceRestriction,
-		s.NamespaceKey,
-		s.k8s,
-	)
-	podSynched := s.k8s.WatchForPods(k8s.NewPodHandler(s.ServiceAccountKey))
-	namespaceSynched := s.k8s.WatchForNamespaces(k8s.NewNamespaceHandler(s.NamespaceKey))
-	synced := false
-	for i := 0; i < defaultCacheSyncAttempts && !synced; i++ {
-		synced = cache.WaitForCacheSync(nil, podSynched, namespaceSynched)
-	}
-
-	if !synced {
-		log.Fatalf("Attempted to wait for caches to be synced for %d however it is not done.  Giving up.", defaultCacheSyncAttempts)
-	} else {
-		log.Debugln("Caches have been synced.  Proceeding with server.")
-	}
 
 	r := mux.NewRouter()
 
-	if s.Debug {
+	if s.cfg.Debug {
 		// This is a potential security risk if enabled in some clusters, hence the flag
 		r.HandleFunc("/debug/store", s.handleDebug)
 	}
@@ -524,23 +472,18 @@ func (s *Server) Run() error {
 	r.HandleFunc("/computeMetadata/v1/instance/attributes/", s.handleAttributes)
 	r.HandleFunc("/computeMetadata/v1/instance/attributes/{attribute:[^/]+}", s.handleAttribute)
 
-	log.Infof("Listening on port %s", s.AppPort)
-	if err := http.ListenAndServe(":"+s.AppPort, newLogHandler(r)); err != nil {
+	log.Infof("Listening on port %s", s.cfg.AppPort)
+	if err := http.ListenAndServe(":"+s.cfg.AppPort, newLogHandler(r)); err != nil {
 		log.Fatalf("Error creating http server: %+v", err)
 	}
 	return nil
 }
 
 // NewServer will create a new Server with default values.
-func NewServer() *Server {
+func NewServer(cfg *config.Config, iam *iam.Client, mapper mappings.Mapper) *Server {
 	return &Server{
-		AppPort:               defaultAppPort,
-		BackoffMaxElapsedTime: defaultMaxElapsedTime,
-		ServiceAccountKey:     defaultServiceAccountKey,
-		BackoffMaxInterval:    defaultMaxInterval,
-		LogLevel:              defaultLogLevel,
-		MetadataAddress:       defaultMetadataAddress,
-		NamespaceKey:          defaultNamespaceKey,
-		HostIP:                defaultHostIP,
+		cfg:    cfg,
+		iam:    iam,
+		mapper: mapper,
 	}
 }
