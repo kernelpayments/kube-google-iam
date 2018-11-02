@@ -34,31 +34,35 @@ func main() {
 		log.SetLevel(logLevel)
 	}
 
-	k8sClient, err := k8s.NewClient(cfg.KubernetesMaster, cfg.KubeconfigFile)
-	if err != nil {
-		log.Fatal(err)
-	}
+	var mapper mappings.Mapper
+	if cfg.MockServiceAccount == "" {
+		k8sClient, err := k8s.NewClient(cfg.KubernetesMaster, cfg.KubeconfigFile)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	mapper := mappings.NewK8sMapper(
-		cfg.ServiceAccountKey,
-		cfg.DefaultServiceAccount,
-		cfg.NamespaceRestriction,
-		cfg.NamespaceKey,
-		k8sClient,
-	)
-	podSynched := k8sClient.WatchForPods(k8s.NewPodHandler(cfg.ServiceAccountKey))
-	namespaceSynched := k8sClient.WatchForNamespaces(k8s.NewNamespaceHandler(cfg.NamespaceKey))
-	synced := false
-	for i := 0; i < cacheSyncAttempts && !synced; i++ {
-		synced = cache.WaitForCacheSync(nil, podSynched, namespaceSynched)
-	}
+		mapper = mappings.NewK8sMapper(
+			cfg.ServiceAccountKey,
+			cfg.DefaultServiceAccount,
+			cfg.NamespaceRestriction,
+			cfg.NamespaceKey,
+			k8sClient,
+		)
+		podSynched := k8sClient.WatchForPods(k8s.NewPodHandler(cfg.ServiceAccountKey))
+		namespaceSynched := k8sClient.WatchForNamespaces(k8s.NewNamespaceHandler(cfg.NamespaceKey))
+		synced := false
+		for i := 0; i < cacheSyncAttempts && !synced; i++ {
+			synced = cache.WaitForCacheSync(nil, podSynched, namespaceSynched)
+		}
 
-	if !synced {
-		log.Fatalf("Attempted to wait for caches to be synced for %d however it is not done.  Giving up.", cacheSyncAttempts)
+		if !synced {
+			log.Fatalf("Attempted to wait for caches to be synced for %d however it is not done.  Giving up.", cacheSyncAttempts)
+		} else {
+			log.Debugln("Caches have been synced.  Proceeding with server.")
+		}
 	} else {
-		log.Debugln("Caches have been synced.  Proceeding with server.")
+		mapper = mappings.NewConstantMapper(cfg.MockServiceAccount)
 	}
-
 	iam := iam.NewClient()
 
 	s := server.NewServer(cfg, iam, mapper)

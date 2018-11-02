@@ -27,6 +27,7 @@ type Config struct {
 	Version               bool
 	BackoffMaxInterval    time.Duration
 	BackoffMaxElapsedTime time.Duration
+	MockServiceAccount    string
 }
 
 func Load() *Config {
@@ -61,6 +62,7 @@ func Load() *Config {
 	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log level")
 	fs.BoolVar(&cfg.Verbose, "verbose", false, "Verbose")
 	fs.BoolVar(&cfg.Version, "version", false, "Print the version and exits")
+	fs.StringVar(&cfg.MockServiceAccount, "mock-service-account", cfg.MockServiceAccount, "Mock service account. If set, all requests will act as if they were from a pod with the given service account. Useful for testing locally.")
 	pflag.Parse()
 
 	cfg.AttributeWhitelistSet = make(map[string]struct{})
