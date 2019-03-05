@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KernelPay/kube-google-iam/iam"
-	"github.com/KernelPay/kube-google-iam/k8s"
-	"github.com/KernelPay/kube-google-iam/mappings"
+	"github.com/kernelpayments/kube-google-iam/iam"
+	"github.com/kernelpayments/kube-google-iam/k8s"
+	"github.com/kernelpayments/kube-google-iam/mappings"
 	"github.com/cenk/backoff"
 	"github.com/gorilla/mux"
 	log "github.com/sirupsen/logrus"

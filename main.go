@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/KernelPay/kube-google-iam/iptables"
-	"github.com/KernelPay/kube-google-iam/server"
-	"github.com/KernelPay/kube-google-iam/version"
+	"github.com/kernelpayments/kube-google-iam/iptables"
+	"github.com/kernelpayments/kube-google-iam/server"
+	"github.com/kernelpayments/kube-google-iam/version"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 )

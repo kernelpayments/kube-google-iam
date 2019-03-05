@@ -3,10 +3,10 @@ package mappings
 import (
 	"fmt"
 
-	"github.com/KernelPay/kube-google-iam/k8s"
+	"github.com/kernelpayments/kube-google-iam/k8s"
 	glob "github.com/ryanuber/go-glob"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 )
 
 // ServiceAccountMapper handles relevant logic around associating IPs with a given IAM serviceAccount
@@ -80,7 +80,7 @@ func (r *ServiceAccountMapper) checkServiceAccountForNamespace(serviceAccountArn
 
 	ns, err := r.store.NamespaceByName(namespace)
 	if err != nil {
-		log.Debug("Unable to find an indexed namespace of %s", namespace)
+		log.Debugf("Unable to find an indexed namespace of %s", namespace)
 		return false
 	}
 

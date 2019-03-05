@@ -1,12 +1,9 @@
-workspace:
-  base: /go
-  path: src/github.com/KernelPay/kube-google-iam
-
 pipeline:
   build:
-    image: golang:1.9
+    image: golang:1.12
     commands:
-    - ORG_PATH="github.com/KernelPay"
+    - export GOCACHE=/go/cache
+    - ORG_PATH="github.com/kernelpayments"
     - BINARY_NAME=kube-google-iam
     - REPO_PATH=$ORG_PATH/$BINARY_NAME
     - VERSION_VAR=$REPO_PATH/version.Version
@@ -15,9 +12,10 @@ pipeline:
     - BUILD_DATE=$(date +%Y-%m-%d-%H:%M)
     - GOBUILD_VERSION_ARGS="-s -X $VERSION_VAR=$DRONE_TAG -X $GIT_VAR=$DRONE_COMMIT -X $BUILD_DATE_VAR=$BUILD_DATE"
     - echo Building with version args... $GOBUILD_VERSION_ARGS
-    - go get -v -u github.com/Masterminds/glide
-    - glide install --strip-vendor
-    - CGO_ENABLED=0 go build -o build/bin/linux/kube-google-iam -ldflags "$GOBUILD_VERSION_ARGS" github.com/KernelPay/kube-google-iam
+    - CGO_ENABLED=0 go build -mod=readonly -o build/bin/linux/kube-google-iam -ldflags "$GOBUILD_VERSION_ARGS" .
+    volumes:
+    - /tmp/go/pkg:/go/pkg
+    - /tmp/go/cache:/go/cache
   docker:
     image: eu.gcr.io/kernel-prod/drone-docker
     prefix: gcr.io/kernel-payments

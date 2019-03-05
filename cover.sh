@@ -23,7 +23,7 @@ declare -a packages=('' \
 # Test each package and append coverage profile info to coverage.out
 for pkg in "${packages[@]}"
 do
-    go test -v -covermode=count -coverprofile=coverage_tmp.out "github.com/KernelPay/kube-google-iam/$pkg" || ERROR="Error testing $pkg"
+    go test -v -covermode=count -coverprofile=coverage_tmp.out "github.com/kernelpayments/kube-google-iam/$pkg" || ERROR="Error testing $pkg"
     tail -n +2 coverage_tmp.out >> coverage.out 2> /dev/null ||:
 done
 
