@@ -20,5 +20,6 @@ pipeline:
     - CGO_ENABLED=0 go build -o build/bin/linux/kube-google-iam -ldflags "$GOBUILD_VERSION_ARGS" github.com/KernelPay/kube-google-iam
   docker:
     image: eu.gcr.io/kernel-prod/drone-docker
+    prefix: gcr.io/kernel-payments
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
