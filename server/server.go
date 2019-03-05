@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cenk/backoff"
+	"github.com/gorilla/mux"
 	"github.com/kernelpayments/kube-google-iam/iam"
 	"github.com/kernelpayments/kube-google-iam/k8s"
 	"github.com/kernelpayments/kube-google-iam/mappings"
-	"github.com/cenk/backoff"
-	"github.com/gorilla/mux"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/tools/cache"
 )
@@ -315,6 +315,17 @@ func (s *Server) handleEmail(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(serviceAccountMapping.ServiceAccount))
 }
 
+func (s *Server) handleScopes(w http.ResponseWriter, r *http.Request) {
+	serviceAccountMapping := s.extractServiceAccount(w, r)
+	if serviceAccountMapping == nil {
+		return
+	}
+
+	// Hardcode the scopes. Not sure if there's a way to dynamically query them?
+	// This is needed by gsutil.
+	w.Write([]byte("https://www.googleapis.com/auth/cloud-platform\nhttps://www.googleapis.com/auth/userinfo.email\n"))
+}
+
 func (s *Server) handleServiceAccount(w http.ResponseWriter, r *http.Request) {
 	serviceAccountMapping := s.extractServiceAccount(w, r)
 	if serviceAccountMapping == nil {
@@ -524,6 +535,7 @@ func (s *Server) Run() error {
 	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/token", s.handleToken)
 	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/email", s.handleEmail)
 	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/identity", s.handleIdentity)
+	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/scopes", s.handleScopes)
 	r.HandleFunc("/computeMetadata/v1/project", s.handleSlashRedir)
 	r.HandleFunc("/computeMetadata/v1/project/", s.handleProxy)
 	r.HandleFunc("/computeMetadata/v1/project/project-id", s.handleProxy)
