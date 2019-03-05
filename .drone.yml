@@ -19,5 +19,6 @@ pipeline:
   docker:
     image: eu.gcr.io/kernel-prod/drone-docker
     prefix: gcr.io/kernel-payments
+    tag_latest: true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

@@ -53,7 +53,7 @@ spec:
           effect: NoSchedule
       containers:
       - name: kube-google-iam
-        image: kernelpay/kube-google-iam:dev
+        image: gcr.io/kernelpayments/kube-google-iam
         args:
           - "--verbose"
         imagePullPolicy: Always
