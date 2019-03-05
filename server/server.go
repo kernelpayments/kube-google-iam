@@ -364,6 +364,17 @@ func (s *Server) handleServiceAccounts(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(fmt.Sprintf("default/\n%s\n", serviceAccountMapping.ServiceAccount)))
 }
 
+func (s *Server) handleSlashRedir(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Metadata-Flavor", "Google")
+
+	if r.Header.Get("Metadata-Flavor") != "Google" {
+		http.Error(w, "Missing Metadata-Flavor:Google header!", http.StatusForbidden)
+		return
+	}
+
+	http.Redirect(w, r, "http://metadata.google.internal"+r.URL.Path+"/", http.StatusMovedPermanently)
+}
+
 // xForwardedForStripper is identical to http.DefaultTransport except that it
 // strips X-Forwarded-For headers.  It fulfills the http.RoundTripper
 // interface.
@@ -377,7 +388,7 @@ func (x xForwardedForStripper) RoundTrip(req *http.Request) (*http.Response, err
 	return http.DefaultTransport.RoundTrip(req)
 }
 
-func (s *Server) reverseProxyHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: s.MetadataAddress})
 	proxy.Transport = xForwardedForStripper{}
 	proxy.ServeHTTP(w, r)
@@ -502,19 +513,27 @@ func (s *Server) Run() error {
 	}
 	r.HandleFunc("/healthz", s.handleHealth)
 	r.HandleFunc("/", s.handleDiscovery)
+	r.HandleFunc("/computeMetadata", s.handleSlashRedir)
 	r.HandleFunc("/computeMetadata/", s.handleDiscovery)
+	r.HandleFunc("/computeMetadata/v1/", s.handleSlashRedir)
 	r.HandleFunc("/computeMetadata/v1/", s.handleDiscovery)
+	r.HandleFunc("/computeMetadata/v1/instance/service-accounts", s.handleSlashRedir)
+	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/", s.handleServiceAccounts)
+	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}", s.handleSlashRedir)
+	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/", s.handleServiceAccount)
 	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/token", s.handleToken)
 	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/email", s.handleEmail)
 	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/identity", s.handleIdentity)
-	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/{serviceAccount:[^/]+}/", s.handleServiceAccount)
-	r.HandleFunc("/computeMetadata/v1/instance/service-accounts/", s.handleServiceAccounts)
-	r.HandleFunc("/computeMetadata/v1/project/", s.reverseProxyHandler)
-	r.HandleFunc("/computeMetadata/v1/project/project-id", s.reverseProxyHandler)
-	r.HandleFunc("/computeMetadata/v1/project/numeric-project-id", s.reverseProxyHandler)
-	r.HandleFunc("/computeMetadata/v1/instance/id", s.reverseProxyHandler)
-	r.HandleFunc("/computeMetadata/v1/instance/zone", s.reverseProxyHandler)
-	r.HandleFunc("/computeMetadata/v1/instance/cpu-platform", s.reverseProxyHandler)
+	r.HandleFunc("/computeMetadata/v1/project", s.handleSlashRedir)
+	r.HandleFunc("/computeMetadata/v1/project/", s.handleProxy)
+	r.HandleFunc("/computeMetadata/v1/project/project-id", s.handleProxy)
+	r.HandleFunc("/computeMetadata/v1/project/numeric-project-id", s.handleProxy)
+	r.HandleFunc("/computeMetadata/v1/instance", s.handleSlashRedir)
+	r.HandleFunc("/computeMetadata/v1/instance/", s.handleDiscovery)
+	r.HandleFunc("/computeMetadata/v1/instance/id", s.handleProxy)
+	r.HandleFunc("/computeMetadata/v1/instance/zone", s.handleProxy)
+	r.HandleFunc("/computeMetadata/v1/instance/cpu-platform", s.handleProxy)
+	r.HandleFunc("/computeMetadata/v1/instance/attributes", s.handleSlashRedir)
 	r.HandleFunc("/computeMetadata/v1/instance/attributes/", s.handleAttributes)
 	r.HandleFunc("/computeMetadata/v1/instance/attributes/{attribute:[^/]+}", s.handleAttribute)
 
